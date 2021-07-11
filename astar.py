@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """Module docstring."""
 
+import math
+import unittest
+
 import pyglet
 from pyglet import shapes
 from pyglet.window import mouse
 
-# A-star
-#
 
+# TODO: should be able to pan and zoom on the game board.
+
+# TODO: separate game logic from graphics.
 
 class Tile:
-  """Class docstring."""
+  """A game tile."""
 
   def __init__(self, idx, x, y, width, height, color, batch, fgbatch):
-    """A game tile."""
     self.idx = idx
     self.x = x
     self.y = y
@@ -27,44 +30,69 @@ class Tile:
                                       batch=batch)
     self.make_labels()
 
-    self.active = False
+    self.black = False
+
+    self.d = 0
+    self.s = 0
+    self.parent = 0
 
   def make_labels(self):
-    """Given the coordinate of the lower left corner of a tile, return a tuple
-    of 3 labels for f, g and h scores.
-    """
-    self.label_1 = pyglet.text.Label('X', font_name='Times New Roman',
+    self.label_1 = pyglet.text.Label(' ', font_name='Times New Roman',
                                      font_size=20, x=self.x+10, y=self.y+70,
                                      batch=self.fgbatch)
-    self.label_2 = pyglet.text.Label('X', font_name='Times New Roman',
+    self.label_2 = pyglet.text.Label(' ', font_name='Times New Roman',
                                      font_size=20, x=self.x+70, y=self.y+70,
                                      batch=self.fgbatch)
-    self.label_3 = pyglet.text.Label(f'{self.idx}', font_name='Times New Roman',
+    self.label_3 = pyglet.text.Label(f' ', font_name='Times New Roman',
                                      font_size=24, x=self.x+35, y=self.y+25,
                                      batch=self.fgbatch)
 
+  def draw(self):
+    if self.black:
+      self.rectangle.color = (20, 20, 20)
+      return
+
+    self.rectangle.color = self.color
+    self.label_1.text = f'{self.d}'
+    self.label_2.text = f'{self.s}'
+    self.label_3.text = f'{self.s+self.d}'
+
 
 class Game:
-  """Class docstring."""
+  """A game window for displaying the A* pathing algorithm."""
 
   def __init__(self, rows=3, columns=3):
-    """A game window for displaying the A* pathing algorithm."""
-    self.dragging = False
-    self.tiles = []
-    self.circles = []
-
     self.rows = rows
     self.columns = columns
 
+    # self.dragging = False
+    # Storage for game tiles
+    self.tiles = []
+    # self.circles = []  # storage for debug circle shapes
+
+    # pyglet objects for drawing the game.
+    # window
     self.window = pyglet.window.Window(1320, 770)
+    # batch for shapes
     self.batch = pyglet.graphics.Batch()
+    # batch for foreground text
     self.fgbatch = pyglet.graphics.Batch()
 
+    # A-star implementation objects
+    self.open_list = []
+    self.closed_list = []
+    self.current = None
+    self.src = None
+    self.dest = None
+
+    # Create all tiles
     self.make_tiles()
+
+    # Event handlers
     self.window.push_handlers(on_draw=self.on_draw)
     self.window.push_handlers(on_mouse_press=self.on_mouse_press)
-    self.window.push_handlers(on_mouse_drag=self.on_mouse_drag)
-    self.window.push_handlers(on_mouse_release=self.on_mouse_release)
+    # self.window.push_handlers(on_mouse_drag=self.on_mouse_drag)
+    # self.window.push_handlers(on_mouse_release=self.on_mouse_release)
 
   def make_tiles(self):
     """Populate self.tiles."""
@@ -90,14 +118,6 @@ class Game:
     circle.delete()
     self.circles.remove(circle)
 
-  def tile(self, x, y):
-    row = int(y / 110)
-    col = int(x / 110)
-    idx = (row*self.columns) + col
-    print(f'that\'s tile #{idx}')
-
-    return self.tiles[idx]
-
   def on_draw(self):
     self.window.clear()
     self.batch.draw()
@@ -107,40 +127,158 @@ class Game:
     """On mouse press."""
     if button == mouse.LEFT:
       print(f'The left mouse button was pressed at ({x},{y}).')
-      self.draw_circle(x, y)
+      # self.draw_circle(x, y)
 
       if x < 110 * self.columns and y < 110 * self.rows:
-        tile = self.tile(x, y)
-        if tile.rectangle.color == [55, 55, 255]:
-          print('make red')
-          tile.rectangle.color = (255, 55, 55)
-          # labels[idx][0].text = ' '
-        else:
-          print('make blue')
+        idx = self.tile(x, y)
+        tile = self.tiles[idx]
+
+        if not self.src:
+          print(f'set src to {idx}')
+          self.src = idx
           tile.rectangle.color = (55, 55, 255)
-          # labels[idx][0].text = 'X'
+          tile.label_3.text = 'S'
+
+          return
+
+        if not self.dest:
+          print(f'set dest to {idx}')
+          self.dest = idx
+          tile.rectangle.color = (55, 55, 255)
+          tile.label_3.text = 'D'
+
+          return
+
+        if tile.black:
+          tile.black = False
+          tile.rectangle.color = (255, 255, 255)
+        else:
+          tile.black = True
+          tile.rectangle.color = (20, 20, 20)
+
     elif button == mouse.RIGHT:
-      for tile in self.tiles:
-        tile.rectangle.color = (255, 255, 255)
-        # for labelset in self.labels:
-        #     for label in labelset:
-        #         label.text = ' '
+      self.start_pathing()
+      print(f'current tile {self.current}')
+      for idx in self.closed_list:
+        self.tiles[idx].rectangle.color = (255,55,55)
+      for idx in self.open_list:
+        if idx == self.dest:
+          continue
+        tile = self.tiles[idx]
+        tile.rectangle.color = (55,55,255)
+        tile.label_1.text = f'{tile.d}'
+        tile.label_2.text = f'{tile.s}'
+        tile.label_3.text = f'{tile.d+tile.s}'
+      self.tiles[self.current].rectangle.color = (55,255,55)
 
-  def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
-    print(f'mouse DRAG - {x},{y} -{dx},{dy}')
-    self.dragging = True
-    tile = self.tile(x, y)
-    # if already active
-    if not tile.active:
-      tile.rectangle.color = (55, 55, 255)
-      tile.active = True
+  def tile(self, x, y):
+    """Get tile idx from x,y position."""
+    row = int(y / 110)
+    col = int(x / 110)
 
-  def on_mouse_release(self, x, y, button, modifiers):
-    if self.dragging:
-      print('clear dragging')
-      self.dragging = False
-      for tile in self.tiles:
-        tile.rectangle.color = (255, 255, 255)
+    return (row*self.columns) + col
+
+  def rowcol(self, idx):
+    """Get row and column from idx."""
+    return int(idx / self.columns), idx % self.columns
+
+  def get_neighbors(self, current):
+    neighbors = (
+        (14, current - self.columns - 1),
+        (10, current - self.columns),
+        (14, current - self.columns + 1),
+        (10, current - 1),
+        (10, current + 1),
+        (14, current + self.columns - 1),
+        (10, current + self.columns),
+        (14, current + self.columns + 1)
+    )
+
+    current_cost = self.tiles[self.current].s
+    res = []
+
+    for cost, idx in neighbors:
+      if idx < 0:
+        continue
+      if idx > len(self.tiles):
+        continue
+      if (current+1) % self.columns == 0 and idx % self.columns == 0:
+        continue
+      if current % self.columns == 0 and (idx+1) % self.columns == 0:
+        continue
+
+      res.append((cost+current_cost, idx))
+
+    return res
+
+  def get_lowest_t(self):
+    # Pick the tile with the lowest T score (S+D scores). If there's a tie,
+    # pick the one with the lowest D score.
+    if len(self.open_list) == 1:
+      return self.open_list[0]
+
+    sortby = {}
+    for idx in self.open_list:
+      tile = self.tiles[idx]
+      t = tile.s+tile.d
+      if t in sortby:
+        sortby[t].append(idx)
+      else:
+        sortby[t] = [idx]
+    tiles_with_lowest_t = sorted(sortby.items())[0][1]
+
+    if len(tiles_with_lowest_t) == 1:
+      return tiles_with_lowest_t[0]
+
+    # If there were multiple with the same T value, sort again by S value.
+    sortby = {}
+    for idx in tiles_with_lowest_t:
+      tile = self.tiles[idx]
+      if tile.d in sortby:
+        sortby[tile.d].append(idx)
+      else:
+        sortby[tile.d] = [idx]
+
+    # Return the first entry with lowest S value.
+    return sorted(sortby.items())[0][1][0]
+
+  def distance(self, src, dest):
+    dest_row, dest_col = self.rowcol(dest)
+    src_row, src_col = self.rowcol(src)
+    dx = abs(dest_col - src_col)
+    dy = abs(dest_row - src_row)
+
+    return int(math.sqrt(dx**2 + dy**2) * 10)
+
+  def start_pathing(self):
+    """Start pathing."""
+    if self.current:
+      self.open_list.remove(self.current)
+      self.closed_list.append(self.current)
+      self.current = self.get_lowest_t()
+    else:
+      self.open_list = [self.src]
+      self.current = self.get_lowest_t()
+
+    if self.current == self.dest:
+      return True
+
+    # Evaluate neighbors
+    for cost, idx in self.get_neighbors(self.current):
+      tile = self.tiles[idx]
+      if tile.black or idx in self.closed_list:
+        continue
+
+      if idx not in self.open_list or cost < tile.s:
+        tile.s = cost  # update-or-set
+        tile.d = self.distance(idx, self.dest)  # set or overwrite
+        tile.parent = self.current  # for tracking path. is this right? idx is
+        # usually only known to the game. now a list is a linked list?
+        if idx not in self.open_list:
+          self.open_list.append(idx)
+
+    return False
+
 
 
 def main():
@@ -148,5 +286,75 @@ def main():
   pyglet.app.run()
 
 
+def test_distance():
+  g = Game(7, 12)
+  assert g.distance(30, 52) == 28
+
+
+def test_rowcol():
+  g = Game(7, 12)
+  assert g.rowcol(83) == (6,11)
+
+
+def test_get_neighbors():
+  g = Game(7, 12)
+  res = g.get_neighbors(30)
+  assert res == [(14, 17), (10, 18), (14, 19), (10, 29), (10, 31), (14, 41),
+                 (10, 42), (14, 43)]
+  for cost, idx in res:
+    g.tiles[idx].s = cost
+  res = g.get_neighbors(29)
+  assert res == [(14, 16), (24, 17), (24, 18), (10, 28), (10, 30), (14, 40),
+                 (24, 41), (24, 42)]
+
+
+def test_get_lowest_t():
+  g = Game(7, 12)
+  g.src = 30
+  dest = 52  # let's take the first step toward 52
+  g.open_list = [17,18,19,29,31,41,42,43]
+  print(f'set g.open_list to {g.open_list}')
+  for f in g.open_list:
+    dist = g.distance(f, dest)
+    print(f'idx {f} dist to dest {dist}')
+    g.tiles[f].d = dist
+  assert g.get_lowest_t() == 41  # this is the correct next step
+  # this doesn't have any side effects on state
+  g.src = 16
+  dest = 42
+  g.open_list = [3,4,5,15,16,17,27,28,29]
+  print(f'set g.open_list to {g.open_list}')
+  for f in g.open_list:
+    dist = g.distance(f, dest)
+    print(f'idx {f} dist to dest {dist}')
+    g.tiles[f].d = dist
+  assert g.get_lowest_t() == 29
+
+
+def test_start_pathing():
+  tc = unittest.TestCase()
+  g = Game(7, 12)
+  g.src = 30
+  g.dest = 52
+  tc.assertFalse( g.start_pathing() )
+  tc.assertEqual( g.current, 30 )
+  tc.assertEqual( [30], g.closed_list )
+  tc.assertEqual( [17, 18, 19, 29, 31, 41, 42, 43], g.open_list )
+  tc.assertFalse( g.start_pathing() )
+  tc.assertEqual( g.current, 41 )
+  tc.assertEqual( [30, 41], g.closed_list )
+  tc.assertEqual( [17, 18, 19, 29, 31, 42, 43, 28, 40, 52, 53, 54], g.open_list )
+  tc.assertTrue( g.start_pathing() )
+  tc.assertEqual( g.current, g.dest )
+  tc.assertEqual( [30, 41], g.closed_list )
+  tc.assertEqual( [17, 18, 19, 29, 31, 42, 43, 28, 40, 52, 53, 54], g.open_list )
+
+
 if __name__ == '__main__':
   main()
+  #test_distance()
+  #test_rowcol()
+  #test_get_neighbors()
+  #test_get_lowest_t()
+  #test_start_pathing()
+  #print('passed')
