@@ -16,17 +16,16 @@ from pyglet.window import mouse
 class Tile:
   """A game tile."""
 
-  def __init__(self, idx, x, y, width, height, color, batch, fgbatch):
+  def __init__(self, idx, x, y, size, color, batch, fgbatch):
     self.idx = idx
     self.x = x
     self.y = y
-    self.width = width
-    self.height = height
+    self.size = size
     self.color = color
     self.batch = batch
     self.fgbatch = fgbatch
 
-    self.rectangle = shapes.Rectangle(x, y, width, height, color=color,
+    self.rectangle = shapes.Rectangle(x, y, size, size, color=color,
                                       batch=batch)
     self.make_labels()
 
@@ -65,6 +64,10 @@ class Game:
     self.rows = rows
     self.columns = columns
 
+    # size values for tiles
+    self.size = 100
+    self.padding = 10
+
     # self.dragging = False
     # Storage for game tiles
     self.tiles = []
@@ -99,13 +102,13 @@ class Game:
     x = 0
     y = 0
     for idx in range(self.rows * self.columns):
-      self.tiles.append(Tile(idx, x, y, 100, 100, (255, 255, 255), self.batch,
+      self.tiles.append(Tile(idx, x, y, self.size, (255, 255, 255), self.batch,
                              self.fgbatch))
       if (idx+1) % self.columns == 0:
         x = 0
-        y = y + 110
+        y = y + self.size + self.padding
       else:
-        x = x + 110
+        x = x + self.size + self.padding
 
   def draw_circle(self, x, y):
     circle = shapes.Circle(x, y, radius=10, color=(50, 225, 30),
@@ -129,8 +132,9 @@ class Game:
       print(f'The left mouse button was pressed at ({x},{y}).')
       # self.draw_circle(x, y)
 
-      if x < 110 * self.columns and y < 110 * self.rows:
+      if x < (self.size+self.padding) * self.columns and y < (self.size+self.padding) * self.rows:
         idx = self.tile(x, y)
+        print(f'got tile {idx}')
         tile = self.tiles[idx]
 
         if not self.src:
@@ -157,24 +161,25 @@ class Game:
           tile.rectangle.color = (20, 20, 20)
 
     elif button == mouse.RIGHT:
-      self.start_pathing()
-      print(f'current tile {self.current}')
-      for idx in self.closed_list:
-        self.tiles[idx].rectangle.color = (255,55,55)
-      for idx in self.open_list:
-        if idx == self.dest:
-          continue
-        tile = self.tiles[idx]
-        tile.rectangle.color = (55,55,255)
-        tile.label_1.text = f'{tile.d}'
-        tile.label_2.text = f'{tile.s}'
-        tile.label_3.text = f'{tile.d+tile.s}'
+      if not self.current or self.current != self.dest:
+        self.start_pathing()
+        print(f'current tile {self.current}')
+        for idx in self.closed_list:
+          self.tiles[idx].rectangle.color = (255,55,55)
+        for idx in self.open_list:
+          if idx == self.dest:
+            continue
+          tile = self.tiles[idx]
+          tile.rectangle.color = (55,55,255)
+          tile.label_1.text = f'{tile.d}'
+          tile.label_2.text = f'{tile.s}'
+          tile.label_3.text = f'{tile.d+tile.s}'
       self.tiles[self.current].rectangle.color = (55,255,55)
 
   def tile(self, x, y):
     """Get tile idx from x,y position."""
-    row = int(y / 110)
-    col = int(x / 110)
+    row = int(y / (self.size+self.padding))
+    col = int(x / (self.size+self.padding))
 
     return (row*self.columns) + col
 
@@ -253,15 +258,24 @@ class Game:
   def start_pathing(self):
     """Start pathing."""
     if self.current:
+      if self.current == self.dest:
+        print(f'called start_pathing but pathing is done')
+        idx = self.current
+        while idx != self.src:
+          print(f'setting tile {idx} green')
+          self.tiles[idx].rectangle.color = (55, 255, 55)
+          idx = self.tiles[idx].parent
+
+        return True
+      orig = self.current
       self.open_list.remove(self.current)
       self.closed_list.append(self.current)
       self.current = self.get_lowest_t()
+      self.tiles[self.current].parent = orig
     else:
       self.open_list = [self.src]
       self.current = self.get_lowest_t()
 
-    if self.current == self.dest:
-      return True
 
     # Evaluate neighbors
     for cost, idx in self.get_neighbors(self.current):
